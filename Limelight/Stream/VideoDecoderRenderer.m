@@ -389,11 +389,6 @@
 - (void) renderThread{
     while(true){
         RenderQueueUnit* qFrame = [_renderQueue dequeue];
-        while (_renderQueue.count > 0){
-            [self presentFrame:qFrame];
-            qFrame = [_renderQueue dequeue];
-            Log(LOG_I, @"Advancing two frames in the same vsync");
-        }
         if (qFrame == nil){
             Log(LOG_I, @"Exiting render thread");
             _renderQueue = nil;
