@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5669820D2729033900DF024A /* MKBlockingQueue.m in Sources */ = {isa = PBXBuildFile; fileRef = 5669820B2729030600DF024A /* MKBlockingQueue.m */; };
+		5669820E2729033900DF024A /* MKBlockingQueue.m in Sources */ = {isa = PBXBuildFile; fileRef = 5669820B2729030600DF024A /* MKBlockingQueue.m */; };
+		56698211272904AE00DF024A /* RenderQueueUnit.m in Sources */ = {isa = PBXBuildFile; fileRef = 56698210272904AE00DF024A /* RenderQueueUnit.m */; };
+		56698212272904AE00DF024A /* RenderQueueUnit.m in Sources */ = {isa = PBXBuildFile; fileRef = 56698210272904AE00DF024A /* RenderQueueUnit.m */; };
 		693B3A9B218638CD00982F7B /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 693B3A9A218638CD00982F7B /* Settings.bundle */; };
 		9819CC14254F107A008A7C8E /* RelativeTouchHandler.m in Sources */ = {isa = PBXBuildFile; fileRef = 9819CC13254F107A008A7C8E /* RelativeTouchHandler.m */; };
 		9819CC1D254F1730008A7C8E /* RelativeTouchHandler.m in Sources */ = {isa = PBXBuildFile; fileRef = 9819CC13254F107A008A7C8E /* RelativeTouchHandler.m */; };
@@ -160,6 +164,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		5669820B2729030600DF024A /* MKBlockingQueue.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = MKBlockingQueue.m; sourceTree = "<group>"; };
+		5669820C2729032C00DF024A /* MKBlockingQueue.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MKBlockingQueue.h; sourceTree = "<group>"; };
+		5669820F272904AE00DF024A /* RenderQueueUnit.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = RenderQueueUnit.h; sourceTree = "<group>"; };
+		56698210272904AE00DF024A /* RenderQueueUnit.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = RenderQueueUnit.m; sourceTree = "<group>"; };
 		693B3A9A218638CD00982F7B /* Settings.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = Settings.bundle; sourceTree = "<group>"; };
 		9803CCAB254F9EAF00EE185E /* ConnectionCallbacks.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ConnectionCallbacks.h; sourceTree = "<group>"; };
 		98132E8C20BC9A62007A053F /* Moonlight v1.1.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = "Moonlight v1.1.xcdatamodel"; sourceTree = "<group>"; };
@@ -582,6 +590,10 @@
 				FB89461C19F646E200339C8A /* VideoDecoderRenderer.h */,
 				FB89461D19F646E200339C8A /* VideoDecoderRenderer.m */,
 				9803CCAB254F9EAF00EE185E /* ConnectionCallbacks.h */,
+				5669820B2729030600DF024A /* MKBlockingQueue.m */,
+				5669820C2729032C00DF024A /* MKBlockingQueue.h */,
+				5669820F272904AE00DF024A /* RenderQueueUnit.h */,
+				56698210272904AE00DF024A /* RenderQueueUnit.m */,
 			);
 			path = Stream;
 			sourceTree = "<group>";
@@ -971,6 +983,7 @@
 				FB1A681A213284FB00507771 /* UIAppView.m in Sources */,
 				FB1A681B213284FB00507771 /* ComputerScrollView.m in Sources */,
 				FB1A681C213284FB00507771 /* AppCollectionView.m in Sources */,
+				56698212272904AE00DF024A /* RenderQueueUnit.m in Sources */,
 				9865DC37213287FE0005B9B9 /* StreamFrameViewController.m in Sources */,
 				9865DC38213287FE0005B9B9 /* LoadingFrameViewController.m in Sources */,
 				9865DC31213260F10005B9B9 /* mkcert.c in Sources */,
@@ -1007,6 +1020,7 @@
 				FB1A67A5213245BD00507771 /* StreamConfiguration.m in Sources */,
 				FB1A67A7213245BD00507771 /* StreamManager.m in Sources */,
 				FB1A67A9213245BD00507771 /* VideoDecoderRenderer.m in Sources */,
+				5669820E2729033900DF024A /* MKBlockingQueue.m in Sources */,
 				FB1A67A12132458C00507771 /* main.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1024,6 +1038,7 @@
 				FB9AFD401A7E127D00872C98 /* AppListResponse.m in Sources */,
 				FB89463419F646E200339C8A /* Utils.m in Sources */,
 				FBDE86E619F82297001C18A8 /* UIAppView.m in Sources */,
+				5669820D2729033900DF024A /* MKBlockingQueue.m in Sources */,
 				FB89462F19F646E200339C8A /* Connection.m in Sources */,
 				FB9AFD321A7D867C00872C98 /* AppAssetRetriever.m in Sources */,
 				FB4678FF1A565DAC00377732 /* WakeOnLanManager.m in Sources */,
@@ -1049,6 +1064,7 @@
 				9832D1361BBCD5C50036EF48 /* TemporaryApp.m in Sources */,
 				98D585701C0ED0E800F6CC00 /* TemporarySettings.m in Sources */,
 				FB89462819F646E200339C8A /* CryptoManager.m in Sources */,
+				56698211272904AE00DF024A /* RenderQueueUnit.m in Sources */,
 				DC1F5A07206436B20037755F /* ConnectionHelper.m in Sources */,
 				FB89462E19F646E200339C8A /* PairManager.m in Sources */,
 				FB9AFD371A7E02DB00872C98 /* HttpRequest.m in Sources */,

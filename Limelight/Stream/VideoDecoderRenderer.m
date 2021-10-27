@@ -68,9 +68,12 @@
     
     _view = view;
     _callbacks = callbacks;
-    
+
+    _renderQueue = [[MKBlockingQueue alloc] init];
+    [self performSelectorInBackground:@selector(renderThread) withObject:nil];
+
     [self reinitializeDisplayLayer];
-    
+
     return self;
 }
 
@@ -88,16 +91,21 @@
         }
         [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
     }
+
 }
                      
 - (void)displayLinkCallback:(CADisplayLink *)sender
 {
-    // No-op - rendering done in submitDecodeBuffer
+    // No-op - rendering done in renderThread
 }
 
 - (void)cleanup
 {
     [_displayLink invalidate];
+    [_renderQueue setInterrupt:true];
+    [_renderQueue.lock signal];
+    [_renderQueue.lock unlock];
+    [_renderQueue setInterrupt:true];
 }
 
 #define FRAME_START_PREFIX_SIZE 4
@@ -314,7 +322,6 @@
     // From now on, CMBlockBuffer owns the data pointer and will free it when it's dereferenced
     
     CMSampleBufferRef sampleBuffer;
-    
     status = CMSampleBufferCreate(kCFAllocatorDefault,
                                   blockBuffer,
                                   true, NULL,
@@ -343,25 +350,57 @@
         CFDictionarySetValue(dict, kCMSampleAttachmentKey_DependsOnOthers, kCFBooleanFalse);
     }
 
-    // Enqueue video samples on the main thread
-    dispatch_async(dispatch_get_main_queue(), ^{
-        // Enqueue the next frame
-        [self->displayLayer enqueueSampleBuffer:sampleBuffer];
-        
-        if (frameType == FRAME_TYPE_IDR) {
-            // Ensure the layer is visible now
-            self->displayLayer.hidden = NO;
-            
-            // Tell our parent VC to hide the progress indicator
-            [self->_callbacks videoContentShown];
-        }
-        
-        // Dereference the buffers
-        CFRelease(blockBuffer);
-        CFRelease(sampleBuffer);
-    });
+    RenderQueueUnit* qFrame = [[RenderQueueUnit alloc] init];
+    [qFrame setFrameType:frameType];
+    [qFrame setBlockBufferRef:blockBuffer];
+    [qFrame setSampleBufferRef:sampleBuffer];
+    [_renderQueue enqueue:qFrame];
     
     return DR_OK;
+}
+
+- (void) presentFrame:(RenderQueueUnit *) sampleBufferHolder{
+    if (sampleBufferHolder != nil){
+        CMBlockBufferRef blockBuffer = [sampleBufferHolder blockBufferRef];
+        CMSampleBufferRef sampleBuffer = [sampleBufferHolder SampleBufferRef];
+        int frameType = [sampleBufferHolder frameType];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (frameType == FRAME_TYPE_IDR) {
+                // Ensure the layer is visible now
+                [self->displayLayer enqueueSampleBuffer:sampleBuffer];
+                self->displayLayer.hidden = NO;
+                
+                // Tell our parent VC to hide the progress indicator
+                [self->_callbacks videoContentShown];
+            }
+            // Enqueue the next frame
+            [self->displayLayer enqueueSampleBuffer:sampleBuffer];
+
+            // Dereference the buffers
+            CFRelease(blockBuffer);
+            CFRelease(sampleBuffer);
+        });
+        sampleBuffer = NULL;
+        blockBuffer = NULL;
+    }
+}
+
+- (void) renderThread{
+    while(true){
+        RenderQueueUnit* qFrame = [_renderQueue dequeue];
+        while (_renderQueue.count > 0){
+            [self presentFrame:qFrame];
+            qFrame = [_renderQueue dequeue];
+            Log(LOG_I, @"Advancing two frames in the same vsync");
+        }
+        if (qFrame == nil){
+            Log(LOG_I, @"Exiting render thread");
+            _renderQueue = nil;
+            return;
+        }
+        [self presentFrame:qFrame];
+    }
 }
 
 @end
