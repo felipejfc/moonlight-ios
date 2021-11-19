@@ -231,7 +231,8 @@ int ArInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION originalOpusC
     [audioSession setActive: YES error: &audioSessionError];
     
     // FIXME: Calling this breaks surround audio for some reason
-    //[audioSession setPreferredOutputNumberOfChannels:opusConfig->channelCount error:&audioSessionError];
+    [audioSession setPreferredOutputNumberOfChannels:opusConfig.channelCount error:&audioSessionError];
+    NSLog(@"Channel count is %d", opusConfig.channelCount);
     
     OSStatus status;
     
@@ -499,9 +500,9 @@ void ClConnectionStatusUpdate(int status)
     // RFI seems to be broken at all resolutions on the Apple TV 4K (1st gen)
     // on tvOS 14.5.
     _drCallbacks.capabilities =
-#if !TARGET_OS_TV
+//#if !TARGET_OS_TV
                                 CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC |
-#endif
+//#endif
                                 CAPABILITY_DIRECT_SUBMIT;
 
     LiInitializeAudioCallbacks(&_arCallbacks);
