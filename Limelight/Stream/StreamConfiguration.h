@@ -27,6 +27,7 @@
 @property BOOL enableHdr;
 @property BOOL multiController;
 @property BOOL allowHevc;
+@property BOOL useVsync;
 @property NSData* serverCert;
 
 @end

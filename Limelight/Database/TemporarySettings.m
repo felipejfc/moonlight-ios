@@ -35,6 +35,7 @@
     self.framerate = [NSNumber numberWithInteger:[[NSUserDefaults standardUserDefaults] integerForKey:@"framerate"]];
     assert([self.framerate intValue] != 0);
     self.useHevc = [[NSUserDefaults standardUserDefaults] boolForKey:@"useHevc"];
+    self.useVsync = [[NSUserDefaults standardUserDefaults] boolForKey:@"useVsync"];
     self.playAudioOnPC = [[NSUserDefaults standardUserDefaults] boolForKey:@"audioOnPC"];
     self.enableHdr = [[NSUserDefaults standardUserDefaults] boolForKey:@"enableHdr"];
     self.optimizeGames = [[NSUserDefaults standardUserDefaults] boolForKey:@"optimizeGames"];
@@ -66,6 +67,7 @@
     self.height = settings.height;
     self.width = settings.width;
     self.useHevc = settings.useHevc;
+    self.useVsync = settings.useVsync;
     self.playAudioOnPC = settings.playAudioOnPC;
     self.enableHdr = settings.enableHdr;
     self.optimizeGames = settings.optimizeGames;

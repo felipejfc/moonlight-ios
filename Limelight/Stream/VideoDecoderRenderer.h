@@ -15,7 +15,7 @@
 
 @interface VideoDecoderRenderer : NSObject
 
-- (id)initWithView:(UIView*)view callbacks:(id<ConnectionCallbacks>)callbacks;
+- (id)initWithView:(UIView*)view callbacks:(id<ConnectionCallbacks>)callbacks useVsync:(BOOL)useVsync;
 
 - (void)setupWithVideoFormat:(int)videoFormat refreshRate:(int)refreshRate;
 
@@ -27,5 +27,6 @@
 
 
 @property (nonatomic, strong) MKBlockingQueue * renderQueue;
+@property (nonatomic) BOOL vsync;
 
 @end

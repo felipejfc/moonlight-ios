@@ -62,16 +62,17 @@
     }
 }
 
-- (id)initWithView:(StreamView*)view callbacks:(id<ConnectionCallbacks>)callbacks
+- (id)initWithView:(StreamView*)view callbacks:(id<ConnectionCallbacks>)callbacks useVsync:(BOOL)useVsync
 {
     self = [super init];
-    
     _view = view;
     _callbacks = callbacks;
-
+    _vsync = useVsync;
+    NSLog(@"Initializing Video Renderer with Vsync %d", _vsync);
     _renderQueue = [[MKBlockingQueue alloc] init];
-//    [self performSelectorInBackground:@selector(renderThread) withObject:nil];
-
+    if (!_vsync){
+        [self performSelectorInBackground:@selector(renderThread) withObject:nil];
+    }
     [self reinitializeDisplayLayer];
 
     return self;
@@ -89,17 +90,19 @@
                      
 - (void)displayLinkCallback:(CADisplayLink *)sender
 {
-    RenderQueueUnit* qFrame = [_renderQueue dequeue];
-    while([_renderQueue count] > 1){
-        NSLog(@"Advancing multiple frames in the same vsync");
+    if (_vsync){
+        RenderQueueUnit* qFrame = [_renderQueue dequeue];
+        while([_renderQueue count] > 1){
+            [self presentFrameWithQueueUnit:qFrame];
+            qFrame = [_renderQueue dequeue];
+        }
+        if (qFrame == nil){
+            Log(LOG_I, @"Exiting render thread");
+            _renderQueue = nil;
+            return;
+        }
         [self presentFrameWithQueueUnit:qFrame];
-        qFrame = [_renderQueue dequeue];
     }
-    if (qFrame == nil){
-        Log(LOG_I, @"Exiting render thread");
-        return;
-    }
-    [self presentFrameWithQueueUnit:qFrame];
 }
 
 - (void)cleanup
@@ -108,7 +111,6 @@
     [_renderQueue.lock signal];
     [_renderQueue.lock unlock];
     [_displayLink invalidate];
-    _renderQueue = nil;
 }
 
 #define FRAME_START_PREFIX_SIZE 4
@@ -391,6 +393,7 @@
         RenderQueueUnit* qFrame = [_renderQueue dequeue];
         if (qFrame == nil){
             Log(LOG_I, @"Exiting render thread");
+            _renderQueue = nil;
             return;
         }
         [self presentFrameWithQueueUnit:qFrame];

@@ -197,6 +197,7 @@ static const int bitrateTable[] = {
     [self.touchModeSelector addTarget:self action:@selector(touchModeChanged) forControlEvents:UIControlEventValueChanged];
     [self.statsOverlaySelector setSelectedSegmentIndex:currentSettings.statsOverlay ? 1 : 0];
     [self.btMouseSelector setSelectedSegmentIndex:currentSettings.btMouseSupport ? 1 : 0];
+    [self.vsyncSelector setSelectedSegmentIndex:currentSettings.useVsync ? 1 : 0];
     [self.optimizeSettingsSelector setSelectedSegmentIndex:currentSettings.optimizeGames ? 1 : 0];
     [self.multiControllerSelector setSelectedSegmentIndex:currentSettings.multiController ? 1 : 0];
     [self.audioOnPCSelector setSelectedSegmentIndex:currentSettings.playAudioOnPC ? 1 : 0];
@@ -302,6 +303,7 @@ static const int bitrateTable[] = {
     BOOL multiController = [self.multiControllerSelector selectedSegmentIndex] == 1;
     BOOL audioOnPC = [self.audioOnPCSelector selectedSegmentIndex] == 1;
     BOOL useHevc = [self.hevcSelector selectedSegmentIndex] == 1;
+    BOOL useVsync = [self.vsyncSelector selectedSegmentIndex] == 1;
     BOOL btMouseSupport = [self.btMouseSelector selectedSegmentIndex] == 1;
     BOOL absoluteTouchMode = [self.touchModeSelector selectedSegmentIndex] == 1;
     BOOL statsOverlay = [self.statsOverlaySelector selectedSegmentIndex] == 1;
@@ -314,6 +316,7 @@ static const int bitrateTable[] = {
                      multiController:multiController
                            audioOnPC:audioOnPC
                              useHevc:useHevc
+                            useVsync:useVsync
                            enableHdr:NO
                       btMouseSupport:btMouseSupport
                    absoluteTouchMode:absoluteTouchMode
