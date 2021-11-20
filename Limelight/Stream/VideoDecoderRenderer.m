@@ -70,7 +70,7 @@
     _callbacks = callbacks;
 
     _renderQueue = [[MKBlockingQueue alloc] init];
-    [self performSelectorInBackground:@selector(renderThread) withObject:nil];
+//    [self performSelectorInBackground:@selector(renderThread) withObject:nil];
 
     [self reinitializeDisplayLayer];
 
@@ -80,32 +80,35 @@
 - (void)setupWithVideoFormat:(int)videoFormat refreshRate:(int)refreshRate
 {
     self->videoFormat = videoFormat;
-    
-    if (refreshRate > 60) {
-        // HACK: We seem to just get 60 Hz screen updates even with a 120 FPS stream if
-        // we don't set preferredFramesPerSecond somewhere. Since we're a UIKit view, we
-        // have to use CADisplayLink for that. See https://github.com/moonlight-stream/moonlight-ios/issues/372
-        _displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(displayLinkCallback:)];
-        if (@available(iOS 10.0, tvOS 10.0, *)) {
-            _displayLink.preferredFramesPerSecond = refreshRate;
-        }
-        [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
+    _displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(displayLinkCallback:)];
+    if (@available(iOS 10.0, tvOS 10.0, *)) {
+        _displayLink.preferredFramesPerSecond = refreshRate;
     }
-
+    [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
 }
                      
 - (void)displayLinkCallback:(CADisplayLink *)sender
 {
-    // No-op - rendering done in renderThread
+    RenderQueueUnit* qFrame = [_renderQueue dequeue];
+    while([_renderQueue count] > 1){
+        NSLog(@"Advancing multiple frames in the same vsync");
+        [self presentFrameWithQueueUnit:qFrame];
+        qFrame = [_renderQueue dequeue];
+    }
+    if (qFrame == nil){
+        Log(LOG_I, @"Exiting render thread");
+        return;
+    }
+    [self presentFrameWithQueueUnit:qFrame];
 }
 
 - (void)cleanup
 {
-    [_displayLink invalidate];
     [_renderQueue setInterrupt:true];
     [_renderQueue.lock signal];
     [_renderQueue.lock unlock];
-    [_renderQueue setInterrupt:true];
+    [_displayLink invalidate];
+    _renderQueue = nil;
 }
 
 #define FRAME_START_PREFIX_SIZE 4
@@ -322,6 +325,7 @@
     // From now on, CMBlockBuffer owns the data pointer and will free it when it's dereferenced
     
     CMSampleBufferRef sampleBuffer;
+ 
     status = CMSampleBufferCreate(kCFAllocatorDefault,
                                   blockBuffer,
                                   true, NULL,
@@ -359,7 +363,7 @@
     return DR_OK;
 }
 
-- (void) presentFrame:(RenderQueueUnit *) sampleBufferHolder{
+- (void) presentFrameWithQueueUnit:(RenderQueueUnit *) sampleBufferHolder{
     if (sampleBufferHolder != nil){
         CMBlockBufferRef blockBuffer = [sampleBufferHolder blockBufferRef];
         CMSampleBufferRef sampleBuffer = [sampleBufferHolder SampleBufferRef];
@@ -368,15 +372,11 @@
         dispatch_async(dispatch_get_main_queue(), ^{
             if (frameType == FRAME_TYPE_IDR) {
                 // Ensure the layer is visible now
-                [self->displayLayer enqueueSampleBuffer:sampleBuffer];
                 self->displayLayer.hidden = NO;
-                
                 // Tell our parent VC to hide the progress indicator
                 [self->_callbacks videoContentShown];
             }
-            // Enqueue the next frame
             [self->displayLayer enqueueSampleBuffer:sampleBuffer];
-
             // Dereference the buffers
             CFRelease(blockBuffer);
             CFRelease(sampleBuffer);
@@ -387,14 +387,13 @@
 }
 
 - (void) renderThread{
-    while(true){
+    while(_renderQueue != nil){
         RenderQueueUnit* qFrame = [_renderQueue dequeue];
         if (qFrame == nil){
             Log(LOG_I, @"Exiting render thread");
-            _renderQueue = nil;
             return;
         }
-        [self presentFrame:qFrame];
+        [self presentFrameWithQueueUnit:qFrame];
     }
 }
 
