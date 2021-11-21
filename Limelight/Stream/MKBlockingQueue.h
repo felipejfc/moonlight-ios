@@ -50,8 +50,7 @@
 
 @interface MKBlockingQueue()
 @property (nonatomic, strong) NSMutableArray *queue;
-@property (nonatomic, strong) NSCondition *lock;
-@property (nonatomic, strong) NSCondition *waitLock;
+@property (nonatomic, strong) NSCondition *emptyLock;
 @property (nonatomic, strong) dispatch_queue_t dispatchQueue;
 @property (nonatomic) bool interrupt;
 @end

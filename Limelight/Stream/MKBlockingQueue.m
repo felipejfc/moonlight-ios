@@ -40,8 +40,7 @@
     if (self)
     {
         self.queue = [[NSMutableArray alloc] init];
-        self.lock = [[NSCondition alloc] init];
-        self.waitLock = [[NSCondition alloc] init];
+        self.emptyLock = [[NSCondition alloc] init];
         self.dispatchQueue = dispatch_queue_create("com.min.kwon.mkblockingqueue", DISPATCH_QUEUE_SERIAL);
     }
     return self;
@@ -49,27 +48,27 @@
 
 - (void)enqueue:(id)object
 {
-    [_lock lock];
+    [_emptyLock lock];
     [_queue addObject:object];
-    [_lock signal];
-    [_lock unlock];
+    [_emptyLock signal];
+    [_emptyLock unlock];
 }
 
 - (id)dequeue
 {
     __block id object;
     dispatch_sync(_dispatchQueue, ^{
-        [_lock lock];
+        [_emptyLock lock];
         while (_queue.count == 0 && !_interrupt)
         {
-            [_lock wait];
+            [_emptyLock wait];
         }
         if (_interrupt){
             object = nil;
         } else {
             object = [_queue objectAtIndex:0];
             [_queue removeObjectAtIndex:0];
-            [_lock unlock];
+            [_emptyLock unlock];
         }
     });
     
@@ -85,7 +84,7 @@
 {
     self.dispatchQueue = nil;
     self.queue = nil;
-    self.lock = nil;
+    self.emptyLock = nil;
 }
 
 @end
