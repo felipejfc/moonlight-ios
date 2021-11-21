@@ -10,4 +10,13 @@
 
 @implementation RenderQueueUnit
 
+- (id)initWithFrameType:(int)frameType blockBufferRef:(CMBlockBufferRef)blockBufferRef sampleBufferRef:(CMSampleBufferRef)sampleBufferRef dictionaryRef:(CFMutableDictionaryRef) dictionaryRef{
+    self = [super init];
+    _frameType = frameType;
+    _blockBufferRef = blockBufferRef;
+    _sampleBufferRef = sampleBufferRef;
+    _dictionaryRef = dictionaryRef;
+    return self;
+}
+
 @end
