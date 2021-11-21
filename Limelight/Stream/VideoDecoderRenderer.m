@@ -70,8 +70,8 @@
     _vsync = useVsync;
     NSLog(@"Initializing Video Renderer with Vsync %d", _vsync);
     _renderQueue = [[MKBlockingQueue alloc] init];
-    if (!_vsync){
-        [self performSelectorInBackground:@selector(renderThread) withObject:nil];
+    if (_vsync){
+        self.vsyncLock = [[NSCondition alloc] init];
     }
     [self reinitializeDisplayLayer];
 
@@ -86,30 +86,24 @@
         _displayLink.preferredFramesPerSecond = refreshRate;
     }
     [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
+    [self performSelectorInBackground:@selector(renderThread) withObject:nil];
 }
                      
 - (void)displayLinkCallback:(CADisplayLink *)sender
 {
     if (_vsync){
-        RenderQueueUnit* qFrame = [_renderQueue dequeue];
-        while([_renderQueue count] > 1){
-            [self presentFrameWithQueueUnit:qFrame];
-            qFrame = [_renderQueue dequeue];
-        }
-        if (qFrame == nil){
-            Log(LOG_I, @"Exiting render thread");
-            _renderQueue = nil;
-            return;
-        }
-        [self presentFrameWithQueueUnit:qFrame];
+        [_vsyncLock lock];
+        [_vsyncLock signal];
+        [_vsyncLock unlock];
     }
 }
+
 
 - (void)cleanup
 {
     [_renderQueue setInterrupt:true];
-    [_renderQueue.lock signal];
-    [_renderQueue.lock unlock];
+    [_renderQueue.emptyLock signal];
+    [_renderQueue.emptyLock unlock];
     [_displayLink invalidate];
 }
 
@@ -327,7 +321,7 @@
     // From now on, CMBlockBuffer owns the data pointer and will free it when it's dereferenced
     
     CMSampleBufferRef sampleBuffer;
- 
+     
     status = CMSampleBufferCreate(kCFAllocatorDefault,
                                   blockBuffer,
                                   true, NULL,
@@ -339,10 +333,10 @@
         CFRelease(blockBuffer);
         return DR_NEED_IDR;
     }
-    
+
     CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, YES);
     CFMutableDictionaryRef dict = (CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachments, 0);
-    
+
     CFDictionarySetValue(dict, kCMSampleAttachmentKey_DisplayImmediately, kCFBooleanTrue);
     CFDictionarySetValue(dict, kCMSampleAttachmentKey_IsDependedOnByOthers, kCFBooleanTrue);
     
@@ -356,19 +350,16 @@
         CFDictionarySetValue(dict, kCMSampleAttachmentKey_DependsOnOthers, kCFBooleanFalse);
     }
 
-    RenderQueueUnit* qFrame = [[RenderQueueUnit alloc] init];
-    [qFrame setFrameType:frameType];
-    [qFrame setBlockBufferRef:blockBuffer];
-    [qFrame setSampleBufferRef:sampleBuffer];
+    RenderQueueUnit* qFrame = [[RenderQueueUnit alloc] initWithFrameType:frameType blockBufferRef:blockBuffer sampleBufferRef:sampleBuffer dictionaryRef:dict];
     [_renderQueue enqueue:qFrame];
     
     return DR_OK;
 }
 
-- (void) presentFrameWithQueueUnit:(RenderQueueUnit *) sampleBufferHolder{
+- (void) presentFrameWithQueueUnit:(RenderQueueUnit *) sampleBufferHolder {
     if (sampleBufferHolder != nil){
         CMBlockBufferRef blockBuffer = [sampleBufferHolder blockBufferRef];
-        CMSampleBufferRef sampleBuffer = [sampleBufferHolder SampleBufferRef];
+        CMSampleBufferRef sampleBuffer = [sampleBufferHolder sampleBufferRef];
         int frameType = [sampleBufferHolder frameType];
 
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -377,6 +368,7 @@
                 self->displayLayer.hidden = NO;
                 // Tell our parent VC to hide the progress indicator
                 [self->_callbacks videoContentShown];
+                
             }
             [self->displayLayer enqueueSampleBuffer:sampleBuffer];
             // Dereference the buffers
@@ -389,14 +381,30 @@
 }
 
 - (void) renderThread{
+    [NSThread setThreadPriority:1.0]; //sets max priority to our render thread
     while(_renderQueue != nil){
         RenderQueueUnit* qFrame = [_renderQueue dequeue];
+        
+        while([_renderQueue count] > 1) {
+            CFDictionarySetValue(qFrame.dictionaryRef, kCMSampleAttachmentKey_DoNotDisplay, kCFBooleanTrue);
+            [self presentFrameWithQueueUnit:qFrame];
+            qFrame = [_renderQueue dequeue];
+        }
+
         if (qFrame == nil){
             Log(LOG_I, @"Exiting render thread");
             _renderQueue = nil;
             return;
         }
+        
         [self presentFrameWithQueueUnit:qFrame];
+
+        //if vsync is on wait for a swap
+        if (_vsync){
+            [_vsyncLock lock];
+            [_vsyncLock waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+            [_vsyncLock unlock];
+        }        
     }
 }
 

@@ -27,6 +27,7 @@
 
 
 @property (nonatomic, strong) MKBlockingQueue * renderQueue;
+@property (nonatomic, strong) NSCondition *vsyncLock;
 @property (nonatomic) BOOL vsync;
 
 @end
