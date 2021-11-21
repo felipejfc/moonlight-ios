@@ -385,7 +385,7 @@
     while(_renderQueue != nil){
         RenderQueueUnit* qFrame = [_renderQueue dequeue];
         
-        while([_renderQueue count] > 1) {
+        while(qFrame != nil && [_renderQueue count] > 1) {
             CFDictionarySetValue(qFrame.dictionaryRef, kCMSampleAttachmentKey_DoNotDisplay, kCFBooleanTrue);
             [self presentFrameWithQueueUnit:qFrame];
             qFrame = [_renderQueue dequeue];
@@ -404,7 +404,7 @@
             [_vsyncLock lock];
             [_vsyncLock waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
             [_vsyncLock unlock];
-        }        
+        }
     }
 }
 
