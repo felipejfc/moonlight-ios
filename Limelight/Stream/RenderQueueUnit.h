@@ -14,9 +14,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic) int frameType;
 @property (nonatomic) CMBlockBufferRef blockBufferRef;
 @property (nonatomic) CMSampleBufferRef sampleBufferRef;
-@property (nonatomic) CFMutableDictionaryRef dictionaryRef;
 
-- (id)initWithFrameType:(int)frameType blockBufferRef:(CMBlockBufferRef)blockBufferRef sampleBufferRef:(CMSampleBufferRef)sampleBufferRef dictionaryRef:(CFMutableDictionaryRef) dictionaryRef;
+- (id)initWithFrameType:(int)frameType blockBufferRef:(CMBlockBufferRef)blockBufferRef sampleBufferRef:(CMSampleBufferRef)sampleBufferRef;
 
 @end
 

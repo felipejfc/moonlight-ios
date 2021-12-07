@@ -29,5 +29,6 @@
 @property (nonatomic, strong) MKBlockingQueue * renderQueue;
 @property (nonatomic, strong) NSCondition *vsyncLock;
 @property (nonatomic) BOOL vsync;
+@property (nonatomic) CMVideoFormatDescriptionRef formatDesc;
 
 @end

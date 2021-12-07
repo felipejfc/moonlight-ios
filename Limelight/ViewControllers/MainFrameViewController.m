@@ -651,7 +651,7 @@ static NSMutableSet* hostList;
     //
     // It should also be a user preference, since some games may require higher peak
     // brightness than the iOS device can support to look correct in HDR mode.
-    if (@available(iOS 11.3, *)) {
+    if (@available(iOS 11.3, tvOS 11.2, *)) {
         _streamConfig.enableHdr =
             app.hdrSupported && // App supported
             (app.host.serverCodecModeSupport & 0x200) != 0 && // HEVC Main10 encoding on host PC GPU

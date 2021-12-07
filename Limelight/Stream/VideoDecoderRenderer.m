@@ -6,9 +6,10 @@
 //  Copyright (c) 2014 Moonlight Stream. All rights reserved.
 //
 
+@import VideoToolbox;
+
 #import "VideoDecoderRenderer.h"
 #import "StreamView.h"
-
 #include "Limelight.h"
 
 @implementation VideoDecoderRenderer {
@@ -20,9 +21,9 @@
     int videoFormat;
     
     NSData *spsData, *ppsData, *vpsData;
-    CMVideoFormatDescriptionRef formatDesc;
     
     CADisplayLink* _displayLink;
+    VTDecompressionSessionRef decompressionSession;
 }
 
 - (void)reinitializeDisplayLayer
@@ -56,9 +57,15 @@
     waitingForVps = true;
     vpsData = nil;
     
-    if (formatDesc != nil) {
-        CFRelease(formatDesc);
-        formatDesc = nil;
+    if (_formatDesc != nil) {
+        CFRelease(_formatDesc);
+        _formatDesc = nil;
+    }
+    
+    if (decompressionSession != nil){
+        VTDecompressionSessionInvalidate(decompressionSession);
+        CFRelease(decompressionSession);
+        decompressionSession = nil;
     }
 }
 
@@ -87,6 +94,8 @@
     }
     [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
     [self performSelectorInBackground:@selector(renderThread) withObject:nil];
+    
+    /*test*/
 }
                      
 - (void)displayLinkCallback:(CADisplayLink *)sender
@@ -188,6 +197,102 @@
     }
 }
 
+void decompressionCallback(
+                           void * CM_NULLABLE videoRendererRef,
+                           void * CM_NULLABLE sourceFrameRef,
+                           OSStatus status,
+                           VTDecodeInfoFlags infoFlags,
+                           CM_NULLABLE CVImageBufferRef imageBuffer,
+                           CMTime presentationTimestamp,
+                           CMTime presentationDuration
+){
+    if (status != noErr)
+    {
+        NSError *error = [NSError errorWithDomain:NSOSStatusErrorDomain code:status userInfo:nil];
+        NSLog(@"Decompression session error: %@", error);
+    }
+    
+    VideoDecoderRenderer * decoderRenderer = (__bridge VideoDecoderRenderer *) videoRendererRef;
+    RenderQueueUnit * qFrame = (__bridge RenderQueueUnit *) sourceFrameRef;
+    CMVideoFormatDescriptionRef formatDescriptionRef;
+    
+    OSStatus res = CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, imageBuffer, &formatDescriptionRef);
+    
+    if (res != noErr){
+        NSLog(@"Failed to create video format description from imageBuffer");
+    }
+    
+    CMSampleBufferRef sampleBuffer;
+    CMSampleTimingInfo timing = {CMTimeMake(1, 60), kCMTimeZero, kCMTimeInvalid}; // TODO
+    OSStatus err = CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault, imageBuffer, formatDescriptionRef, &timing, &sampleBuffer);
+    
+    if (err != noErr){
+        NSLog(@"Error creating sample buffer for decompressed image buffer %d", err);
+    }
+    
+    qFrame.sampleBufferRef = sampleBuffer;
+    [decoderRenderer.renderQueue enqueue:qFrame];
+    
+    if(sourceFrameRef != NULL){
+        CFBridgingRelease(sourceFrameRef); // transfer ownership back to ARC
+    }
+    if(formatDescriptionRef != NULL){
+        CFRelease(formatDescriptionRef);
+    }
+}
+
+- (void) setupDecompressionSession {
+    if (decompressionSession != NULL){
+        VTDecompressionSessionInvalidate(decompressionSession);
+        CFRelease(decompressionSession);
+        decompressionSession = nil;
+    }
+    VTDecompressionOutputCallbackRecord outputCallback;
+    outputCallback.decompressionOutputCallback = (VTDecompressionOutputCallback)decompressionCallback;
+    outputCallback.decompressionOutputRefCon = (__bridge void*) self;
+    
+    SInt32 pixFmtNum = kCVPixelFormatType_32BGRA; //TODO not all display supports
+    CFNumberRef pixFmtType = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &pixFmtNum);
+    CFBooleanRef hdrDisplayMeta = kCFBooleanTrue;
+    CFDictionaryRef dstBufferAttr = nil;
+    
+    if (@available(tvOS 14.0, iOS 14.0, *)) {
+        const void * keys[] = { (void *)kCVPixelBufferPixelFormatTypeKey, (void *) kVTDecompressionPropertyKey_PropagatePerFrameHDRDisplayMetadata};
+        const void * values[] = { (void *)pixFmtType, (void *) hdrDisplayMeta};
+        
+        dstBufferAttr = CFDictionaryCreate(kCFAllocatorDefault,
+                                                           keys,
+                                                           values,
+                                                           sizeof(keys)/sizeof(void *),
+                                                           nil,
+                                                           nil);
+    } else {
+        const void * keys[] = { (void *)kCVPixelBufferPixelFormatTypeKey};
+        const void * values[] = { (void *)pixFmtType};
+        
+        dstBufferAttr = CFDictionaryCreate(kCFAllocatorDefault,
+                                                           keys,
+                                                           values,
+                                                           sizeof(keys)/sizeof(void *),
+                                                           nil,
+                                                           nil);
+    }
+       
+    
+    int status = VTDecompressionSessionCreate(kCFAllocatorDefault,
+                                             _formatDesc,
+                                             nil,
+                                             dstBufferAttr,
+                                             &outputCallback,
+                                             &decompressionSession);
+    CFRelease(dstBufferAttr);
+    CFRelease(pixFmtType);
+    if (status != noErr) {
+        NSLog(@"Failed to instance VTDecompressionSessionRef, status %d", status);
+    }
+
+}
+
 // This function must free data for bufferType == BUFFER_TYPE_PICDATA
 - (int)submitDecodeBuffer:(unsigned char *)data length:(int)length bufferType:(int)bufferType frameType:(int)frameType pts:(unsigned int)pts
 {
@@ -227,10 +332,10 @@
                                                                              parameterSetPointers,
                                                                              parameterSetSizes,
                                                                              NAL_LENGTH_PREFIX_SIZE,
-                                                                             &formatDesc);
+                                                                             &_formatDesc);
                 if (status != noErr) {
                     Log(LOG_E, @"Failed to create H264 format description: %d", (int)status);
-                    formatDesc = NULL;
+                    _formatDesc = NULL;
                 }
             }
             else {
@@ -246,7 +351,7 @@
                                                                                  parameterSetSizes,
                                                                                  NAL_LENGTH_PREFIX_SIZE,
                                                                                  nil,
-                                                                                 &formatDesc);
+                                                                                 &_formatDesc);
                 } else {
                     // This means Moonlight-common-c decided to give us an HEVC stream
                     // even though we said we couldn't support it. All we can do is abort().
@@ -255,9 +360,12 @@
                 
                 if (status != noErr) {
                     Log(LOG_E, @"Failed to create HEVC format description: %d", (int)status);
-                    formatDesc = NULL;
+                    _formatDesc = NULL;
                 }
             }
+
+            [self setupDecompressionSession];
+
         }
         
         // Data is NOT to be freed here. It's a direct usage of the caller's buffer.
@@ -266,7 +374,7 @@
         return DR_OK;
     }
     
-    if (formatDesc == NULL) {
+    if (_formatDesc == NULL) {
         // Can't decode if we haven't gotten our parameter sets yet
         free(data);
         return DR_NEED_IDR;
@@ -325,7 +433,7 @@
     status = CMSampleBufferCreate(kCFAllocatorDefault,
                                   blockBuffer,
                                   true, NULL,
-                                  NULL, formatDesc, 1, 0,
+                                  NULL, _formatDesc, 1, 0,
                                   NULL, 0, NULL,
                                   &sampleBuffer);
     if (status != noErr) {
@@ -334,33 +442,46 @@
         return DR_NEED_IDR;
     }
 
-    CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, YES);
-    CFMutableDictionaryRef dict = (CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachments, 0);
-
-    CFDictionarySetValue(dict, kCMSampleAttachmentKey_DisplayImmediately, kCFBooleanTrue);
-    CFDictionarySetValue(dict, kCMSampleAttachmentKey_IsDependedOnByOthers, kCFBooleanTrue);
+    VTDecodeFrameFlags flags = kVTDecodeFrame_EnableAsynchronousDecompression;
+    VTDecodeInfoFlags flagOut = 0;
     
-    if (frameType == FRAME_TYPE_PFRAME) {
-        // P-frame
-        CFDictionarySetValue(dict, kCMSampleAttachmentKey_NotSync, kCFBooleanTrue);
-        CFDictionarySetValue(dict, kCMSampleAttachmentKey_DependsOnOthers, kCFBooleanTrue);
-    } else {
-        // I-frame
-        CFDictionarySetValue(dict, kCMSampleAttachmentKey_NotSync, kCFBooleanFalse);
-        CFDictionarySetValue(dict, kCMSampleAttachmentKey_DependsOnOthers, kCFBooleanFalse);
+    RenderQueueUnit * ru = [[RenderQueueUnit alloc] init];
+    ru.frameType = frameType;
+    ru.blockBufferRef = blockBuffer;
+    ru.sampleBufferRef = sampleBuffer;
+
+    OSStatus decodeStatus = VTDecompressionSessionDecodeFrame(decompressionSession, sampleBuffer, flags, (__bridge_retained void *)ru, &flagOut);
+
+    CFRelease(sampleBuffer);
+
+    if (decodeStatus != noErr){
+        NSLog(@"Failed to decompress frame");
     }
-
-    RenderQueueUnit* qFrame = [[RenderQueueUnit alloc] initWithFrameType:frameType blockBufferRef:blockBuffer sampleBufferRef:sampleBuffer dictionaryRef:dict];
-    [_renderQueue enqueue:qFrame];
-    
+   
     return DR_OK;
 }
 
-- (void) presentFrameWithQueueUnit:(RenderQueueUnit *) sampleBufferHolder {
-    if (sampleBufferHolder != nil){
-        CMBlockBufferRef blockBuffer = [sampleBufferHolder blockBufferRef];
-        CMSampleBufferRef sampleBuffer = [sampleBufferHolder sampleBufferRef];
-        int frameType = [sampleBufferHolder frameType];
+- (void) presentFrameWithQueueUnit:(RenderQueueUnit *) queueUnit {
+    if (queueUnit != nil){
+        CMBlockBufferRef blockBuffer = [queueUnit blockBufferRef];
+        CMSampleBufferRef sampleBuffer = [queueUnit sampleBufferRef];
+        int frameType = [queueUnit frameType];
+        
+        CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, YES);
+        CFMutableDictionaryRef dict = (CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachments, 0);
+
+        CFDictionarySetValue(dict, kCMSampleAttachmentKey_DisplayImmediately, kCFBooleanTrue);
+        CFDictionarySetValue(dict, kCMSampleAttachmentKey_IsDependedOnByOthers, kCFBooleanTrue);
+        
+        if (frameType == FRAME_TYPE_PFRAME) {
+            // P-frame
+            CFDictionarySetValue(dict, kCMSampleAttachmentKey_NotSync, kCFBooleanTrue);
+            CFDictionarySetValue(dict, kCMSampleAttachmentKey_DependsOnOthers, kCFBooleanTrue);
+        } else {
+            // I-frame
+            CFDictionarySetValue(dict, kCMSampleAttachmentKey_NotSync, kCFBooleanFalse);
+            CFDictionarySetValue(dict, kCMSampleAttachmentKey_DependsOnOthers, kCFBooleanFalse);
+        }
 
         dispatch_async(dispatch_get_main_queue(), ^{
             if (frameType == FRAME_TYPE_IDR) {
@@ -386,7 +507,6 @@
         RenderQueueUnit* qFrame = [_renderQueue dequeue];
         
         while(qFrame != nil && [_renderQueue count] > 1) {
-            CFDictionarySetValue(qFrame.dictionaryRef, kCMSampleAttachmentKey_DoNotDisplay, kCFBooleanTrue);
             [self presentFrameWithQueueUnit:qFrame];
             qFrame = [_renderQueue dequeue];
         }
