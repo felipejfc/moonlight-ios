@@ -217,7 +217,6 @@ void decompressionCallback(
     CMVideoFormatDescriptionRef formatDescriptionRef;
     
     OSStatus res = CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, imageBuffer, &formatDescriptionRef);
-    
     if (res != noErr){
         NSLog(@"Failed to create video format description from imageBuffer");
     }
@@ -251,24 +250,12 @@ void decompressionCallback(
     outputCallback.decompressionOutputCallback = (VTDecompressionOutputCallback)decompressionCallback;
     outputCallback.decompressionOutputRefCon = (__bridge void*) self;
     
-    SInt32 pixFmtNum = kCVPixelFormatType_32BGRA; //TODO not all display supports
-    CFNumberRef pixFmtType = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &pixFmtNum);
     CFBooleanRef hdrDisplayMeta = kCFBooleanTrue;
     CFDictionaryRef dstBufferAttr = nil;
     
     if (@available(tvOS 14.0, iOS 14.0, *)) {
-        const void * keys[] = { (void *)kCVPixelBufferPixelFormatTypeKey, (void *) kVTDecompressionPropertyKey_PropagatePerFrameHDRDisplayMetadata};
-        const void * values[] = { (void *)pixFmtType, (void *) hdrDisplayMeta};
-        
-        dstBufferAttr = CFDictionaryCreate(kCFAllocatorDefault,
-                                                           keys,
-                                                           values,
-                                                           sizeof(keys)/sizeof(void *),
-                                                           nil,
-                                                           nil);
-    } else {
-        const void * keys[] = { (void *)kCVPixelBufferPixelFormatTypeKey};
-        const void * values[] = { (void *)pixFmtType};
+        const void * keys[] = { (void *) kVTDecompressionPropertyKey_PropagatePerFrameHDRDisplayMetadata};
+        const void * values[] = { (void *) hdrDisplayMeta};
         
         dstBufferAttr = CFDictionaryCreate(kCFAllocatorDefault,
                                                            keys,
@@ -277,7 +264,6 @@ void decompressionCallback(
                                                            nil,
                                                            nil);
     }
-       
     
     int status = VTDecompressionSessionCreate(kCFAllocatorDefault,
                                              _formatDesc,
@@ -285,8 +271,9 @@ void decompressionCallback(
                                              dstBufferAttr,
                                              &outputCallback,
                                              &decompressionSession);
-    CFRelease(dstBufferAttr);
-    CFRelease(pixFmtType);
+    if(dstBufferAttr != nil){
+        CFRelease(dstBufferAttr);
+    }
     if (status != noErr) {
         NSLog(@"Failed to instance VTDecompressionSessionRef, status %d", status);
     }
