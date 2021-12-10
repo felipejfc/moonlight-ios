@@ -30,5 +30,5 @@
 @property (nonatomic, strong) NSCondition *vsyncLock;
 @property (nonatomic) BOOL vsync;
 @property (nonatomic) CMVideoFormatDescriptionRef formatDesc;
-
+@property (nonatomic) uint refreshRate;
 @end

@@ -67,6 +67,7 @@
         CFRelease(decompressionSession);
         decompressionSession = nil;
     }
+    
 }
 
 - (id)initWithView:(StreamView*)view callbacks:(id<ConnectionCallbacks>)callbacks useVsync:(BOOL)useVsync
@@ -92,10 +93,9 @@
     if (@available(iOS 10.0, tvOS 10.0, *)) {
         _displayLink.preferredFramesPerSecond = refreshRate;
     }
+    _refreshRate = refreshRate;
     [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
     [self performSelectorInBackground:@selector(renderThread) withObject:nil];
-    
-    /*test*/
 }
                      
 - (void)displayLinkCallback:(CADisplayLink *)sender
@@ -222,8 +222,10 @@ void decompressionCallback(
     }
     
     CMSampleBufferRef sampleBuffer;
-    CMSampleTimingInfo timing = {CMTimeMake(1, 60), kCMTimeZero, kCMTimeInvalid}; // TODO
-    OSStatus err = CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault, imageBuffer, formatDescriptionRef, &timing, &sampleBuffer);
+    
+    CMSampleTimingInfo sampleTiming = {CMTimeMake(1, decoderRenderer.refreshRate), kCMTimeZero, kCMTimeInvalid};
+
+    OSStatus err = CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault, imageBuffer, formatDescriptionRef, &sampleTiming, &sampleBuffer);
     
     if (err != noErr){
         NSLog(@"Error creating sample buffer for decompressed image buffer %d", err);
@@ -457,9 +459,9 @@ void decompressionCallback(
         CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, YES);
         CFMutableDictionaryRef dict = (CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachments, 0);
 
-        CFDictionarySetValue(dict, kCMSampleAttachmentKey_DisplayImmediately, kCFBooleanTrue);
         CFDictionarySetValue(dict, kCMSampleAttachmentKey_IsDependedOnByOthers, kCFBooleanTrue);
-        
+        CFDictionarySetValue(dict, kCMSampleAttachmentKey_DisplayImmediately, kCFBooleanTrue);
+
         if (frameType == FRAME_TYPE_PFRAME) {
             // P-frame
             CFDictionarySetValue(dict, kCMSampleAttachmentKey_NotSync, kCFBooleanTrue);
@@ -493,7 +495,7 @@ void decompressionCallback(
     while(_renderQueue != nil){
         RenderQueueUnit* qFrame = [_renderQueue dequeue];
         
-        while(qFrame != nil && [_renderQueue count] > 1) {
+        while(qFrame != nil && [_renderQueue count] > 0) {
             [self presentFrameWithQueueUnit:qFrame];
             qFrame = [_renderQueue dequeue];
         }
