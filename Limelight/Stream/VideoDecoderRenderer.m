@@ -18,11 +18,14 @@
     
     AVSampleBufferDisplayLayer* displayLayer;
     Boolean waitingForSps, waitingForPps, waitingForVps;
+    int refreshRate;
     int videoFormat;
+    BOOL vsync;
+    NSCondition *vsyncLock;
     
     NSData *spsData, *ppsData, *vpsData;
     
-    CADisplayLink* _displayLink;
+    CADisplayLink* displayLink;
     VTDecompressionSessionRef decompressionSession;
 }
 
@@ -75,11 +78,11 @@
     self = [super init];
     _view = view;
     _callbacks = callbacks;
-    _vsync = useVsync;
-    NSLog(@"Initializing Video Renderer with Vsync %d", _vsync);
+    vsync = useVsync;
+    NSLog(@"Initializing Video Renderer with Vsync %d", vsync);
     _renderQueue = [[MKBlockingQueue alloc] init];
-    if (_vsync){
-        self.vsyncLock = [[NSCondition alloc] init];
+    if (vsync){
+        vsyncLock = [[NSCondition alloc] init];
     }
     [self reinitializeDisplayLayer];
 
@@ -89,31 +92,32 @@
 - (void)setupWithVideoFormat:(int)videoFormat refreshRate:(int)refreshRate
 {
     self->videoFormat = videoFormat;
-    _displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(displayLinkCallback:)];
+    displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(displayLinkCallback:)];
     if (@available(iOS 10.0, tvOS 10.0, *)) {
-        _displayLink.preferredFramesPerSecond = refreshRate;
+        displayLink.preferredFramesPerSecond = refreshRate;
     }
-    _refreshRate = refreshRate;
-    [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
+    self->refreshRate = refreshRate;
+    [displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
     [self performSelectorInBackground:@selector(renderThread) withObject:nil];
 }
                      
 - (void)displayLinkCallback:(CADisplayLink *)sender
 {
-    if (_vsync){
-        [_vsyncLock lock];
-        [_vsyncLock signal];
-        [_vsyncLock unlock];
+    if (vsync){
+        [vsyncLock lock];
+        [vsyncLock signal];
+        [vsyncLock unlock];
     }
 }
 
 
 - (void)cleanup
 {
+    [_renderQueue.emptyLock lock];
     [_renderQueue setInterrupt:true];
     [_renderQueue.emptyLock signal];
     [_renderQueue.emptyLock unlock];
-    [_displayLink invalidate];
+    [displayLink invalidate];
 }
 
 #define FRAME_START_PREFIX_SIZE 4
@@ -223,12 +227,12 @@ void decompressionCallback(
     
     CMSampleBufferRef sampleBuffer;
     
-    CMSampleTimingInfo sampleTiming = {CMTimeMake(1, decoderRenderer.refreshRate), kCMTimeZero, kCMTimeInvalid};
+    CMSampleTimingInfo sampleTiming = {CMTimeMake(1, decoderRenderer->refreshRate), kCMTimeZero, kCMTimeInvalid};
 
     OSStatus err = CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault, imageBuffer, formatDescriptionRef, &sampleTiming, &sampleBuffer);
     
     if (err != noErr){
-        NSLog(@"Error creating sample buffer for decompressed image buffer %d", err);
+        NSLog(@"Error creating sample buffer for decompressed image buffer %d", (int)err);
     }
     
     qFrame.sampleBufferRef = sampleBuffer;
@@ -509,10 +513,10 @@ void decompressionCallback(
         [self presentFrameWithQueueUnit:qFrame];
 
         //if vsync is on wait for a swap
-        if (_vsync){
-            [_vsyncLock lock];
-            [_vsyncLock waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
-            [_vsyncLock unlock];
+        if (vsync){
+            [vsyncLock lock];
+            [vsyncLock waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+            [vsyncLock unlock];
         }
     }
 }
