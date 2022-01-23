@@ -33,6 +33,7 @@
         <attribute name="playAudioOnPC" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES" syncable="YES"/>
         <attribute name="statsOverlay" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES" syncable="YES"/>
         <attribute name="uniqueId" attributeType="String" syncable="YES"/>
+        <attribute name="useFramePacing" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES" syncable="YES"/>
         <attribute name="useHevc" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES" syncable="YES"/>
         <attribute name="useVsync" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES" syncable="YES"/>
         <attribute name="width" attributeType="Integer 32" defaultValueString="1280" usesScalarValueType="NO" syncable="YES"/>
