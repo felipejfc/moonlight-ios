@@ -79,6 +79,11 @@
         formatDesc = nil;
     }
     
+    if (formatDescImageBuffer != nil) {
+        CFRelease(formatDescImageBuffer);
+        formatDescImageBuffer = nil;
+    }
+    
     if (decompressionSession != nil){
         VTDecompressionSessionInvalidate(decompressionSession);
         CFRelease(decompressionSession);
@@ -351,6 +356,7 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
         CFRelease(frameBlockBuffer);
         return DR_NEED_IDR;
     }
+
     OSStatus decodeStatus = [self decodeFrameWithSampleBuffer: sampleBuffer frameType: frameType];
     
     if (decodeStatus != noErr){
