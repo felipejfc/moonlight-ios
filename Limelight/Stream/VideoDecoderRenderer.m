@@ -10,8 +10,16 @@
 
 #import "VideoDecoderRenderer.h"
 #import "StreamView.h"
+#import "LinkedBlockingQueue.h"
 
 #include "Limelight.h"
+
+#define MAX_PENDING_FRAMES 150
+
+typedef struct BUFFER_HOLDER {
+    LINKED_BLOCKING_QUEUE_ENTRY entry;
+    CMSampleBufferRef buffer;
+} BUFFER_HOLDER, *PBUFFER_HOLDER;
 
 @implementation VideoDecoderRenderer {
     StreamView* _view;
@@ -27,6 +35,8 @@
     CMVideoFormatDescriptionRef formatDesc;
     CMVideoFormatDescriptionRef formatDescImageBuffer;
     VTDecompressionSessionRef decompressionSession;
+    LINKED_BLOCKING_QUEUE framesQueue;
+    LINKED_BLOCKING_QUEUE framesQueueFreeList;
     
     CADisplayLink* _displayLink;
     BOOL framePacing;
@@ -117,6 +127,10 @@
     else if (@available(iOS 10.0, tvOS 10.0, *)) {
         _displayLink.preferredFramesPerSecond = self->frameRate;
     }
+    
+    LbqInitializeLinkedBlockingQueue(&framesQueue, MAX_PENDING_FRAMES);
+    LbqInitializeLinkedBlockingQueue(&framesQueueFreeList, MAX_PENDING_FRAMES);
+    
     [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
 
 }
@@ -129,15 +143,15 @@
     }
     
     int status = VTDecompressionSessionCreate(kCFAllocatorDefault,
-                                             formatDesc,
-                                             nil,
-                                             nil,
-                                             nil,
-                                             &decompressionSession);
+                                              formatDesc,
+                                              nil,
+                                              nil,
+                                              nil,
+                                              &decompressionSession);
     if (status != noErr) {
         Log(LOG_E, @"Failed to instance VTDecompressionSessionRef, status %d", status);
     }
-
+        
 }
 
 // TODO: Refactor this
@@ -145,12 +159,55 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
 
 - (void)displayLinkCallback:(CADisplayLink *)sender
 {
-    // Do Nothing
+    PBUFFER_HOLDER bufferHolder;
+    while(framePacing && LbqPollQueueElement(&framesQueue, (void**)&bufferHolder) == LBQ_SUCCESS){
+        [self->displayLayer enqueueSampleBuffer:bufferHolder->buffer];
+        CFRelease(bufferHolder->buffer);
+        if (LbqOfferQueueItem(&framesQueueFreeList, bufferHolder, &bufferHolder->entry) != LBQ_SUCCESS){
+            free(bufferHolder);
+        }
+        
+        double displayRefreshRate = 1 / (_displayLink.targetTimestamp - _displayLink.timestamp);
+        
+        // Only pace frames if the display refresh rate is >= 90% of our stream frame rate.
+        // Battery saver, accessibility settings, or device thermals can cause the actual
+        // refresh rate of the display to drop below the physical maximum.
+        if (displayRefreshRate >= frameRate * 0.9f) {
+            // Keep one pending frame to smooth out gaps due to
+            // network jitter at the cost of 1 frame of latency
+            if (LbqGetItemCount(&framesQueue) == 1) {
+                break;
+            }
+        }
+    }
 }
 
 - (void)cleanup
 {
     [_displayLink invalidate];
+    LbqSignalQueueShutdown(&framesQueue);
+    LbqSignalQueueShutdown(&framesQueueFreeList);
+    [self drainFramesQueue];
+}
+
+- (void)drainFramesQueue
+{
+    PLINKED_BLOCKING_QUEUE_ENTRY entry, nextEntry;
+    entry = LbqDestroyLinkedBlockingQueue(&framesQueue);
+    while (entry != NULL){
+        nextEntry = entry->flink;
+        PBUFFER_HOLDER holder = entry->data;
+        CFRelease(holder->buffer);
+        free(entry->data);
+        entry = nextEntry;
+    }
+    
+    entry = LbqDestroyLinkedBlockingQueue(&framesQueueFreeList);
+    while (entry != NULL){
+        nextEntry = entry->flink;
+        free(entry->data);
+        entry = nextEntry;
+    }
 }
 
 #define NALU_START_PREFIX_SIZE 3
@@ -354,21 +411,22 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
         Log(LOG_E, @"CMSampleBufferCreate failed: %d", (int)status);
         CFRelease(dataBlockBuffer);
         CFRelease(frameBlockBuffer);
+        CFRelease(sampleBuffer);
         return DR_NEED_IDR;
     }
        
     OSStatus decodeStatus = [self decodeFrameWithSampleBuffer: sampleBuffer frameType: frameType];
     
-    if (decodeStatus != noErr){
-        Log(LOG_E, @"Failed to decompress frame: %d", decodeStatus);
-        return DR_NEED_IDR;
-    }
-    
     // Dereference the buffers
     CFRelease(dataBlockBuffer);
     CFRelease(frameBlockBuffer);
     CFRelease(sampleBuffer);
-    
+     
+    if (decodeStatus != noErr){
+        Log(LOG_E, @"Failed to decompress frame: %d", decodeStatus);
+        return DR_NEED_IDR;
+    }
+   
     return DR_OK;
 }
 
@@ -403,8 +461,25 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
             return;
         }
         
-        // Enqueue the next frame
-        [self->displayLayer enqueueSampleBuffer:sampleBuffer];
+        if (self->framePacing){
+            PBUFFER_HOLDER holder = [self allocateBufferHolder];
+            if (holder == NULL) {
+                CFRelease(sampleBuffer);
+                Log(LOG_I, @"No buffer holder allocated. Are we draining?");
+                return;
+            }
+            holder->buffer = sampleBuffer;
+            status = LbqOfferQueueItem(&self->framesQueue, holder, &holder->entry);
+            if (status != LBQ_SUCCESS){
+                CFRelease(sampleBuffer);
+                free(holder);
+                Log(LOG_E, @"Error inserting sample buffer into frames queue");
+                return;
+            }
+        } else {
+            [self->displayLayer enqueueSampleBuffer:sampleBuffer];
+            CFRelease(sampleBuffer);
+        }
         
         dispatch_async(dispatch_get_main_queue(), ^{
             if (frameType == FRAME_TYPE_IDR) {
@@ -415,9 +490,25 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
                 [self->_callbacks videoContentShown];
             }
         });
-        
-        CFRelease(sampleBuffer);
     });
+}
+
+- (PBUFFER_HOLDER) allocateBufferHolder {
+    PBUFFER_HOLDER holder;
+    int status = LbqPollQueueElement(&self->framesQueueFreeList, (void**) &holder);
+    if (status == LBQ_SUCCESS){
+        return holder;
+    }
+    else if (status == LBQ_INTERRUPTED) {
+        // We're shutting down. Don't bother allocating.
+        return NULL;
+    }
+    else {
+        LC_ASSERT(err == LBQ_NO_ELEMENT);
+        // Otherwise we'll have to allocate
+        return malloc(sizeof(*holder));
+    }
+    
 }
 
 @end
