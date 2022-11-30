@@ -34,7 +34,6 @@ typedef struct BUFFER_HOLDER {
     NSData *spsData, *ppsData, *vpsData;
     CMVideoFormatDescriptionRef formatDesc;
     CMVideoFormatDescriptionRef formatDescImageBuffer;
-    VTDecompressionSessionRef decompressionSession;
     LINKED_BLOCKING_QUEUE framesQueue;
     LINKED_BLOCKING_QUEUE framesQueueFreeList;
     
@@ -93,12 +92,6 @@ typedef struct BUFFER_HOLDER {
         CFRelease(formatDescImageBuffer);
         formatDescImageBuffer = nil;
     }
-    
-    if (decompressionSession != nil){
-        VTDecompressionSessionInvalidate(decompressionSession);
-        CFRelease(decompressionSession);
-        decompressionSession = nil;
-    }
 }
 
 - (id)initWithView:(StreamView*)view callbacks:(id<ConnectionCallbacks>)callbacks streamAspectRatio:(float)aspectRatio useFramePacing:(BOOL)useFramePacing
@@ -133,25 +126,6 @@ typedef struct BUFFER_HOLDER {
     
     [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
 
-}
-
-- (void) setupDecompressionSession {
-    if (decompressionSession != NULL){
-        VTDecompressionSessionInvalidate(decompressionSession);
-        CFRelease(decompressionSession);
-        decompressionSession = nil;
-    }
-    
-    int status = VTDecompressionSessionCreate(kCFAllocatorDefault,
-                                              formatDesc,
-                                              nil,
-                                              nil,
-                                              nil,
-                                              &decompressionSession);
-    if (status != noErr) {
-        Log(LOG_E, @"Failed to instance VTDecompressionSessionRef, status %d", status);
-    }
-        
 }
 
 // TODO: Refactor this
@@ -330,8 +304,6 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
                     formatDesc = NULL;
                 }
             }
-            
-            [self setupDecompressionSession];
         }
         
         // Data is NOT to be freed here. It's a direct usage of the caller's buffer.
@@ -414,12 +386,36 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
         CFRelease(sampleBuffer);
         return DR_NEED_IDR;
     }
-
-    OSStatus decodeStatus = [self decodeFrameWithSampleBuffer: sampleBuffer frameType: frameType];
+   
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (frameType == FRAME_TYPE_IDR) {
+            // Ensure the layer is visible now
+            self->displayLayer.hidden = NO;
+            
+            // Tell our parent VC to hide the progress indicator
+            [self->_callbacks videoContentShown];
+        }
+    });
     
-    if (decodeStatus != noErr){
-        Log(LOG_E, @"Failed to decompress frame: %d", decodeStatus);
-        return DR_NEED_IDR;
+    if (self->framePacing){
+        PBUFFER_HOLDER holder = [self allocateBufferHolder];
+        int offerStatus = -1;
+        if (holder){
+            holder->buffer = sampleBuffer;
+            offerStatus = LbqOfferQueueItem(&self->framesQueue, holder, &holder->entry);
+            if (offerStatus != LBQ_SUCCESS){
+                Log(LOG_E, @"Error inserting sample buffer into frames queue");
+                LbqOfferQueueItem(&self->framesQueueFreeList, holder, &holder->entry);
+            }
+        }
+        CFRelease(dataBlockBuffer);
+        CFRelease(frameBlockBuffer);
+        if (offerStatus != LBQ_SUCCESS){
+            CFRelease(sampleBuffer);
+        }
+        return DR_OK;
+    } else {
+        [self->displayLayer enqueueSampleBuffer:sampleBuffer];
     }
     
     // Dereference the buffers
@@ -427,75 +423,7 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
     CFRelease(frameBlockBuffer);
     CFRelease(sampleBuffer);
      
-    if (decodeStatus != noErr){
-        Log(LOG_E, @"Failed to decompress frame: %d", decodeStatus);
-        return DR_NEED_IDR;
-    }
-   
     return DR_OK;
-}
-
-- (OSStatus) decodeFrameWithSampleBuffer:(CMSampleBufferRef)sampleBuffer frameType:(int)frameType{
-    VTDecodeFrameFlags flags = kVTDecodeFrame_EnableAsynchronousDecompression;
-    
-    return VTDecompressionSessionDecodeFrameWithOutputHandler(decompressionSession, sampleBuffer, flags, NULL, ^(OSStatus status, VTDecodeInfoFlags infoFlags, CVImageBufferRef  _Nullable imageBuffer, CMTime presentationTimestamp, CMTime presentationDuration) {
-        if (status != noErr)
-        {
-            NSError *error = [NSError errorWithDomain:NSOSStatusErrorDomain code:status userInfo:nil];
-            Log(LOG_E, @"Decompression session error: %@", error);
-            LiRequestIdrFrame();
-            return;
-        }
-        
-        if (self->formatDescImageBuffer == NULL || !CMVideoFormatDescriptionMatchesImageBuffer(self->formatDescImageBuffer, imageBuffer)){
-            
-            OSStatus res = CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, imageBuffer, &(self->formatDescImageBuffer));
-            if (res != noErr){
-                Log(LOG_E, @"Failed to create video format description from imageBuffer");
-                return;
-            }
-        }
-        
-        CMSampleBufferRef sampleBuffer;
-        CMSampleTimingInfo sampleTiming = {kCMTimeInvalid, presentationTimestamp, presentationDuration};
-        
-        OSStatus err = CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault, imageBuffer, self->formatDescImageBuffer, &sampleTiming, &sampleBuffer);
-        
-        if (err != noErr){
-            Log(LOG_E, @"Error creating sample buffer for decompressed image buffer %d", (int)err);
-            return;
-        }
-        
-        if (self->framePacing){
-            PBUFFER_HOLDER holder = [self allocateBufferHolder];
-            if (holder == NULL) {
-                CFRelease(sampleBuffer);
-                Log(LOG_I, @"No buffer holder allocated. Are we draining?");
-                return;
-            }
-            holder->buffer = sampleBuffer;
-            status = LbqOfferQueueItem(&self->framesQueue, holder, &holder->entry);
-            if (status != LBQ_SUCCESS){
-                CFRelease(sampleBuffer);
-                free(holder);
-                Log(LOG_E, @"Error inserting sample buffer into frames queue");
-                return;
-            }
-        } else {
-            [self->displayLayer enqueueSampleBuffer:sampleBuffer];
-            CFRelease(sampleBuffer);
-        }
-        
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (frameType == FRAME_TYPE_IDR) {
-                // Ensure the layer is visible now
-                self->displayLayer.hidden = NO;
-                
-                // Tell our parent VC to hide the progress indicator
-                [self->_callbacks videoContentShown];
-            }
-        });
-    });
 }
 
 - (PBUFFER_HOLDER) allocateBufferHolder {
