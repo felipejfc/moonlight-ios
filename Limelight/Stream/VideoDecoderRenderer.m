@@ -18,7 +18,7 @@
 
 typedef struct BUFFER_HOLDER {
     LINKED_BLOCKING_QUEUE_ENTRY entry;
-    CMSampleBufferRef buffer;
+    CVImageBufferRef buffer;
 } BUFFER_HOLDER, *PBUFFER_HOLDER;
 
 @implementation VideoDecoderRenderer {
@@ -26,7 +26,7 @@ typedef struct BUFFER_HOLDER {
     id<ConnectionCallbacks> _callbacks;
     float _streamAspectRatio;
     
-    AVSampleBufferDisplayLayer* displayLayer;
+    CALayer* displayLayer;
     Boolean waitingForSps, waitingForPps, waitingForVps;
     int videoFormat;
     int frameRate;
@@ -62,7 +62,6 @@ typedef struct BUFFER_HOLDER {
     }
     displayLayer.position = CGPointMake(CGRectGetMidX(_view.bounds), CGRectGetMidY(_view.bounds));
     displayLayer.bounds = CGRectMake(0, 0, videoSize.width, videoSize.height);
-    displayLayer.videoGravity = AVLayerVideoGravityResize;
 
     // Hide the layer until we get an IDR frame. This ensures we
     // can see the loading progress label as the stream is starting.
@@ -142,10 +141,15 @@ typedef struct BUFFER_HOLDER {
         decompressionSession = nil;
     }
     
+    NSDictionary *pixelAttributes = @{
+        (id)kCVPixelBufferIOSurfaceCoreAnimationCompatibilityKey : (id)kCFBooleanTrue,
+        (id)kCVPixelBufferIOSurfacePropertiesKey : @{},
+    };
+
     int status = VTDecompressionSessionCreate(kCFAllocatorDefault,
                                               formatDesc,
                                               nil,
-                                              nil,
+                                              (__bridge CFDictionaryRef _Nullable)(pixelAttributes),
                                               nil,
                                               &decompressionSession);
     if (status != noErr) {
@@ -161,8 +165,7 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
 {
     PBUFFER_HOLDER bufferHolder;
     while(framePacing && LbqPollQueueElement(&framesQueue, (void**)&bufferHolder) == LBQ_SUCCESS){
-        [self->displayLayer enqueueSampleBuffer:bufferHolder->buffer];
-        CFRelease(bufferHolder->buffer);
+        [self updateViewWithImageBuffer:bufferHolder->buffer];
         if (LbqOfferQueueItem(&framesQueueFreeList, bufferHolder, &bufferHolder->entry) != LBQ_SUCCESS){
             free(bufferHolder);
         }
@@ -346,19 +349,6 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
         return DR_NEED_IDR;
     }
     
-    // Check for previous decoder errors before doing anything
-    if (displayLayer.status == AVQueuedSampleBufferRenderingStatusFailed) {
-        Log(LOG_E, @"Display layer rendering failed: %@", displayLayer.error);
-        
-        // Recreate the display layer. We are already on the main thread,
-        // so this is safe to do right here.
-        [self reinitializeDisplayLayer];
-        
-        // Request an IDR frame to initialize the new decoder
-        free(data);
-        return DR_NEED_IDR;
-    }
-    
     // Now we're decoding actual frame data here
     CMBlockBufferRef frameBlockBuffer;
     CMBlockBufferRef dataBlockBuffer;
@@ -441,46 +431,30 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
             LiRequestIdrFrame();
             return;
         }
-        
-        if (self->formatDescImageBuffer == NULL || !CMVideoFormatDescriptionMatchesImageBuffer(self->formatDescImageBuffer, imageBuffer)){
-            
-            OSStatus res = CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, imageBuffer, &(self->formatDescImageBuffer));
-            if (res != noErr){
-                Log(LOG_E, @"Failed to create video format description from imageBuffer");
-                return;
-            }
-        }
-        
-        CMSampleBufferRef sampleBuffer;
-        CMSampleTimingInfo sampleTiming = {kCMTimeInvalid, presentationTimestamp, presentationDuration};
-        
-        OSStatus err = CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault, imageBuffer, self->formatDescImageBuffer, &sampleTiming, &sampleBuffer);
-        
-        if (err != noErr){
-            Log(LOG_E, @"Error creating sample buffer for decompressed image buffer %d", (int)err);
-            return;
-        }
-        
+ 
+        CVPixelBufferRetain(imageBuffer);
+        CVPixelBufferLockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
+
         if (self->framePacing){
             PBUFFER_HOLDER holder = [self allocateBufferHolder];
             if (holder == NULL) {
-                CFRelease(sampleBuffer);
                 Log(LOG_I, @"No buffer holder allocated. Are we draining?");
+                CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
+                CVPixelBufferRelease(imageBuffer);
                 return;
             }
-            holder->buffer = sampleBuffer;
+            holder->buffer = imageBuffer;
             status = LbqOfferQueueItem(&self->framesQueue, holder, &holder->entry);
             if (status != LBQ_SUCCESS){
-                CFRelease(sampleBuffer);
+                CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
+                CVPixelBufferRelease(imageBuffer);
                 free(holder);
                 Log(LOG_E, @"Error inserting sample buffer into frames queue");
                 return;
             }
         } else {
-            [self->displayLayer enqueueSampleBuffer:sampleBuffer];
-            CFRelease(sampleBuffer);
+            [self updateViewWithImageBuffer:imageBuffer];
         }
-        
         dispatch_async(dispatch_get_main_queue(), ^{
             if (frameType == FRAME_TYPE_IDR) {
                 // Ensure the layer is visible now
@@ -490,6 +464,17 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
                 [self->_callbacks videoContentShown];
             }
         });
+    });
+}
+
+- (void) updateViewWithImageBuffer:(CVImageBufferRef)imageBuffer{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        IOSurfaceRef surface = CVPixelBufferGetIOSurface(imageBuffer);
+        IOSurfaceLock(surface, kIOSurfaceLockReadOnly, nil);
+        self->displayLayer.contents = (__bridge id _Nullable)(surface);
+        IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, nil);
+        CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
+        CVPixelBufferRelease(imageBuffer);
     });
 }
 
