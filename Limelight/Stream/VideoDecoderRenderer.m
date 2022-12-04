@@ -125,7 +125,7 @@ typedef struct BUFFER_HOLDER {
     LbqInitializeLinkedBlockingQueue(&framesQueueFreeList, MAX_PENDING_FRAMES);
     
     [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
-
+    [self performSelectorInBackground:@selector(workerThread) withObject:nil];
 }
 
 // TODO: Refactor this
@@ -397,33 +397,35 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
         }
     });
     
-    if (self->framePacing){
-        PBUFFER_HOLDER holder = [self allocateBufferHolder];
-        int offerStatus = -1;
-        if (holder){
-            holder->buffer = sampleBuffer;
-            offerStatus = LbqOfferQueueItem(&self->framesQueue, holder, &holder->entry);
-            if (offerStatus != LBQ_SUCCESS){
-                Log(LOG_E, @"Error inserting sample buffer into frames queue");
-                LbqOfferQueueItem(&self->framesQueueFreeList, holder, &holder->entry);
+    PBUFFER_HOLDER holder = [self allocateBufferHolder];
+    if (holder){
+        holder->buffer = sampleBuffer;
+        if (LbqOfferQueueItem(&self->framesQueue, holder, &holder->entry) != LBQ_SUCCESS){
+            Log(LOG_E, @"Error inserting sample buffer into frames queue");
+            if(LbqOfferQueueItem(&self->framesQueueFreeList, holder, &holder->entry) != LBQ_SUCCESS){
+                free(holder);
             }
-        }
-        CFRelease(dataBlockBuffer);
-        CFRelease(frameBlockBuffer);
-        if (offerStatus != LBQ_SUCCESS){
             CFRelease(sampleBuffer);
         }
-        return DR_OK;
-    } else {
-        [self->displayLayer enqueueSampleBuffer:sampleBuffer];
     }
     
     // Dereference the buffers
     CFRelease(dataBlockBuffer);
     CFRelease(frameBlockBuffer);
-    CFRelease(sampleBuffer);
      
     return DR_OK;
+}
+
+- (void) workerThread {
+    [NSThread setThreadPriority:1.0f];
+    PBUFFER_HOLDER bufferHolder;
+    while(!framePacing && LbqWaitForQueueElement(&framesQueue, (void**)&bufferHolder) == LBQ_SUCCESS){
+        [self->displayLayer enqueueSampleBuffer:bufferHolder->buffer];
+        CFRelease(bufferHolder->buffer);
+        if (LbqOfferQueueItem(&framesQueueFreeList, bufferHolder, &bufferHolder->entry) != LBQ_SUCCESS){
+            free(bufferHolder);
+        }
+    }
 }
 
 - (PBUFFER_HOLDER) allocateBufferHolder {
