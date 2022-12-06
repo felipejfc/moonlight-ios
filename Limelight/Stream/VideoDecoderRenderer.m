@@ -8,6 +8,7 @@
 
 #import "VideoDecoderRenderer.h"
 #import "StreamView.h"
+#include <mach/mach_time.h>
 
 #include "Limelight.h"
 
@@ -329,8 +330,13 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
     }
         
     CMSampleBufferRef sampleBuffer;
+    CMSampleTimingInfo sampleTiming;
     
-    CMSampleTimingInfo sampleTiming = {kCMTimeInvalid, CMTimeMake(pts, 1000), kCMTimeInvalid};
+    if(pts > 0){
+        sampleTiming = (CMSampleTimingInfo){kCMTimeInvalid, CMTimeMake(pts, 1000), kCMTimeInvalid};
+    } else {
+        sampleTiming = (CMSampleTimingInfo){kCMTimeInvalid, CMClockMakeHostTimeFromSystemUnits(mach_absolute_time()), kCMTimeInvalid};
+    }
     
     status = CMSampleBufferCreateReady(kCFAllocatorDefault,
                                   frameBlockBuffer,
